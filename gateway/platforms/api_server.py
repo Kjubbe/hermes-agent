@@ -1790,7 +1790,7 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
                 logger.warning(
                     "api_server model_routes ignored: expected a mapping, got %s", type(raw).__name__)
             return {}
-        allowed_keys = ("model", "provider", "api_key", "base_url")
+        allowed_keys = ("model", "provider", "api_key", "base_url", "toolset_platform")
         routes: dict[str, dict[str, Any]] = {}
         for alias, cfg in raw.items():
             alias_str = str(alias).strip()
@@ -2212,7 +2212,9 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
             session_model=session_model, confirmed_runtime_lock=confirmed_runtime_lock,
             gateway_session_key=gateway_session_key, session_id=session_id)
         user_config = _load_gateway_config()
-        enabled_toolsets = sorted(_get_platform_tools(user_config, "api_server"))
+        # phone bridge: a model route may select its own platform_toolsets block.
+        toolset_platform = (route or {}).get("toolset_platform") or "api_server"
+        enabled_toolsets = sorted(_get_platform_tools(user_config, toolset_platform))
         # Same gate the messaging gateway and TUI apply: ``display.interim_assistant_messages``
         # off means no callback is installed, so mid-turn commentary never leaves the agent.
         if not resolve_display_setting(user_config, "api_server", "interim_assistant_messages", True):
