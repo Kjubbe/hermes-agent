@@ -22,6 +22,30 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
+
+class _LegacyEndpointSSEEventFilter(logging.Filter):
+    """Demote only the harmless legacy MCP SSE ``endpoint`` event warning.
+
+    Some mixed legacy/Streamable-HTTP servers emit this handshake event on the
+    GET stream. Keep unexpected event names at WARNING so protocol changes and
+    genuine server mistakes remain visible.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if (record.name == "mcp.client.streamable_http"
+                and record.levelno == logging.WARNING
+                and record.getMessage() == "Unknown SSE event: endpoint"):
+            record.levelno = logging.DEBUG
+            record.levelname = logging.getLevelName(logging.DEBUG)
+        return True
+
+
+# Install on the SDK module logger (not a broad root/handler filter) so this
+# VM-local compatibility rule follows Hermes across PM-managed MCP environments.
+_MCP_ENDPOINT_SSE_EVENT_FILTER = _LegacyEndpointSSEEventFilter()
+logging.getLogger("mcp.client.streamable_http").addFilter(_MCP_ENDPOINT_SSE_EVENT_FILTER)
+
+
 from tools.mcp_tool_common import _DEFAULT_TOOL_TIMEOUT, mcp_field
 from tools.mcp_tool_config import _npx_cached_bin, _packaged_npx_entry
 from tools.mcp_tool_sampling import ElicitationHandler, SamplingHandler

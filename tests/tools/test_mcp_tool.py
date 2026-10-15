@@ -5,6 +5,7 @@ All tests use mocks -- no real MCP servers or subprocesses are started.
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import threading
@@ -60,6 +61,28 @@ def _make_mock_server(name, session=None, tools=None):
     server.session = session
     server._tools = tools or []
     return server
+
+
+class TestLegacyMCPSSEEventWarningFilter:
+    def test_demotes_only_the_known_endpoint_event(self, caplog):
+        from tools import mcp_tool
+
+        sdk_logger = logging.getLogger("mcp.client.streamable_http")
+        unrelated_logger = logging.getLogger("synthetic.unrelated")
+        assert mcp_tool._MCP_ENDPOINT_SSE_EVENT_FILTER in sdk_logger.filters
+
+        with caplog.at_level(logging.DEBUG, logger=sdk_logger.name):
+            sdk_logger.warning("Unknown SSE event: endpoint")
+            sdk_logger.warning("Unknown SSE event: future-extension")
+            unrelated_logger.warning("Unknown SSE event: endpoint")
+
+        records = [record for record in caplog.records
+                   if record.name in {sdk_logger.name, unrelated_logger.name}]
+        assert [(record.name, record.levelno, record.getMessage()) for record in records] == [
+            (sdk_logger.name, logging.DEBUG, "Unknown SSE event: endpoint"),
+            (sdk_logger.name, logging.WARNING, "Unknown SSE event: future-extension"),
+            (unrelated_logger.name, logging.WARNING, "Unknown SSE event: endpoint"),
+        ]
 
 
 class TestFilterMCPChildren:
