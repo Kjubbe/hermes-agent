@@ -742,6 +742,33 @@ def test_create_happy_path(worker_env):
         conn.close()
 
 
+def test_create_idempotent_readback_after_dependency_block(worker_env):
+    """A parentless dependency_wait payload must not turn a committed hit into an error."""
+    from hermes_cli import kanban_db as kb
+    from hermes_cli import kanban_db_connect as kbc
+    from tools import kanban_tools as kt
+
+    args = {"title": "blocked child", "assignee": "peer", "idempotency_key": "child-key"}
+    first = json.loads(kt._handle_create(args))
+    assert first["ok"] and first["status"] == "ready" and first["gated"] is False
+    with kbc.connect_closing() as conn:
+        tid = first["task_id"]
+        assert kb.claim_task(conn, tid)
+        kb.link_tasks(conn, worker_env, tid, expected_child_run_id=kb.get_task(conn, tid).current_run_id)
+        assert kb.block_task(conn, tid, reason="waiting", kind="dependency")
+        waits = [e for e in kb.list_events(conn, tid) if e.kind == "dependency_wait"]
+        assert (waits[-1].payload or {}).get("parent") is None
+    retried = json.loads(kt._handle_create(args))
+    assert retried["ok"] and retried["task_id"] == tid
+    assert retried["status"] == "todo"
+    assert retried["gated"] is True and retried["gated_by"] == worker_env
+    with kbc.connect_closing() as conn:
+        assert kb.unlink_tasks(conn, worker_env, tid)
+    released = json.loads(kt._handle_create(args))
+    assert released["ok"] and released["task_id"] == tid
+    assert released["status"] == "ready" and released["gated"] is False
+
+
 @pytest.mark.parametrize("explicit", [{"workspace_kind": "scratch"}, {"project": ""}])
 @pytest.mark.parametrize("target_scoped", [False, True])
 def test_create_explicit_scratch_ignores_ambient_board_project(

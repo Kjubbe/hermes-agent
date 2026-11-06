@@ -1148,8 +1148,12 @@ def _handle_create(args: dict, **kw) -> str:
             initial_status=str(args.get("initial_status") or "running"),
             created_by=_persisted_identity(), session_id=session_id)
         landed = _fields(kb.get_task(conn, new_tid), _CREATED_FIELDS)
-        wait = [e for e in kb.list_events(conn, new_tid) if e.kind == "dependency_wait"]
-        gate = {"gated": True, "gated_by": wait[-1].payload["parent"]} if wait else {"gated": False}
+        # An idempotency hit may return an old task whose latest dependency_wait
+        # was emitted by block_task or a reopened parent, neither of which has a
+        # parent field. Historical events also need not describe the current gate.
+        parents_waiting = kb.unsatisfied_parents(conn, new_tid) if landed["status"] == "todo" else []
+        gate = ({"gated": True, "gated_by": parents_waiting[0][0]}
+                if parents_waiting else {"gated": False})
         return _ok(task_id=new_tid, **landed, **gate,
                    subscribed=_maybe_auto_subscribe(conn, new_tid))
 
